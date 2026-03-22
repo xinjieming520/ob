@@ -34,8 +34,7 @@ jobs:
       - name: Prepare output name
         run: |
           mkdir -p obfuscated
-          echo "DATE_SUFFIX=$(date +'%Y-%m-%d')" >> "$GITHUB_ENV"
-          echo "OUTPUT_FILE=obfuscated/_worker.$(date +'%Y-%m-%d').js" >> "$GITHUB_ENV"
+          echo "OUTPUT_FILE=obfuscated/index.js" >> "$GITHUB_ENV"
 
       - name: Obfuscate _worker.js
         run: |
@@ -62,7 +61,7 @@ jobs:
             echo "没有新的混淆文件变更，跳过提交"
             exit 0
           fi
-          git commit -m "build: update obfuscated worker ${DATE_SUFFIX}"
+          git commit -m "build: update obfuscated index.js"
 
       - name: Push changes
         uses: ad-m/github-push-action@master
