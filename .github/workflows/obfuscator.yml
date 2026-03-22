@@ -1,0 +1,71 @@
+name: 混淆 _worker.js
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - _worker.js
+
+concurrency:
+  group: obfuscate-worker-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  obfuscate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    env:
+      TZ: Asia/Shanghai
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install javascript-obfuscator
+        run: npm install -g javascript-obfuscator
+
+      - name: Prepare output name
+        run: |
+          mkdir -p obfuscated
+          echo "DATE_SUFFIX=$(date +'%Y-%m-%d')" >> "$GITHUB_ENV"
+          echo "OUTPUT_FILE=obfuscated/_worker.$(date +'%Y-%m-%d').js" >> "$GITHUB_ENV"
+
+      - name: Obfuscate _worker.js
+        run: |
+          javascript-obfuscator _worker.js --output "$OUTPUT_FILE" \
+          --compact true \
+          --control-flow-flattening true \
+          --control-flow-flattening-threshold 1 \
+          --dead-code-injection true \
+          --dead-code-injection-threshold 1 \
+          --identifier-names-generator hexadecimal \
+          --rename-globals true \
+          --string-array true \
+          --string-array-encoding 'rc4' \
+          --string-array-threshold 1 \
+          --transform-object-keys true \
+          --unicode-escape-sequence true
+
+      - name: Commit obfuscated file
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add "$OUTPUT_FILE"
+          if git diff --cached --quiet; then
+            echo "没有新的混淆文件变更，跳过提交"
+            exit 0
+          fi
+          git commit -m "build: update obfuscated worker ${DATE_SUFFIX}"
+
+      - name: Push changes
+        uses: ad-m/github-push-action@master
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          branch: ${{ github.ref_name }}
