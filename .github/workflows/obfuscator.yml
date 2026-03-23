@@ -1,10 +1,10 @@
-name: 混淆 _worker.js
+name: 混淆 _worker 目录
 
 on:
   workflow_dispatch:
   push:
     paths:
-      - _worker.js
+      - _worker/**
 
 concurrency:
   group: obfuscate-worker-${{ github.ref }}
@@ -22,6 +22,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -31,40 +33,92 @@ jobs:
       - name: Install javascript-obfuscator
         run: npm install -g javascript-obfuscator
 
-      - name: Prepare output name
+      - name: Prepare output directory
         run: |
           mkdir -p obfuscated
-          echo "OUTPUT_FILE=obfuscated/index.js" >> "$GITHUB_ENV"
 
-      - name: Obfuscate _worker.js
+      - name: Collect changed worker files
+        id: changed_files
         run: |
-          javascript-obfuscator _worker.js --output "$OUTPUT_FILE" \
-          --compact true \
-          --control-flow-flattening true \
-          --control-flow-flattening-threshold 1 \
-          --dead-code-injection true \
-          --dead-code-injection-threshold 1 \
-          --identifier-names-generator hexadecimal \
-          --rename-globals true \
-          --string-array true \
-          --string-array-encoding 'rc4' \
-          --string-array-threshold 1 \
-          --transform-object-keys true \
-          --unicode-escape-sequence true
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            find _worker -type f | sort > changed_files.txt
+            : > deleted_files.txt
+          else
+            BEFORE_SHA="${{ github.event.before }}"
+            AFTER_SHA="${{ github.sha }}"
 
-      - name: Commit obfuscated file
+            if [ "$BEFORE_SHA" = "0000000000000000000000000000000000000000" ]; then
+              git ls-tree -r --name-only "$AFTER_SHA" -- _worker > changed_files.txt
+              : > deleted_files.txt
+            else
+              git diff --diff-filter=AMR --name-only "$BEFORE_SHA" "$AFTER_SHA" -- _worker | sort -u > changed_files.txt
+              git diff --diff-filter=D --name-only "$BEFORE_SHA" "$AFTER_SHA" -- _worker | sort -u > deleted_files.txt
+            fi
+          fi
+
+          if [ -s changed_files.txt ]; then
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+            echo "本次需要混淆的文件："
+            cat changed_files.txt
+          else
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+            echo "没有新增或修改的 _worker 文件"
+          fi
+
+          if [ -s deleted_files.txt ]; then
+            echo "本次需要删除的混淆文件："
+            cat deleted_files.txt
+          fi
+
+      - name: Obfuscate changed worker files
+        if: steps.changed_files.outputs.has_changes == 'true'
+        run: |
+          while IFS= read -r input_file; do
+            [ -n "$input_file" ] || continue
+            output_file="obfuscated/${input_file#_worker/}"
+            mkdir -p "$(dirname "$output_file")"
+            echo "Obfuscating $input_file -> $output_file"
+
+            javascript-obfuscator "$input_file" --output "$output_file" \
+            --compact true \
+            --control-flow-flattening true \
+            --control-flow-flattening-threshold 1 \
+            --dead-code-injection true \
+            --dead-code-injection-threshold 1 \
+            --identifier-names-generator hexadecimal \
+            --rename-globals true \
+            --string-array true \
+            --string-array-encoding 'rc4' \
+            --string-array-threshold 1 \
+            --transform-object-keys true \
+            --unicode-escape-sequence true
+          done < changed_files.txt
+
+      - name: Remove deleted worker outputs
+        run: |
+          if [ ! -s deleted_files.txt ]; then
+            exit 0
+          fi
+
+          while IFS= read -r deleted_file; do
+            [ -n "$deleted_file" ] || continue
+            output_file="obfuscated/${deleted_file#_worker/}"
+            if [ -f "$output_file" ]; then
+              echo "Removing $output_file"
+              rm -f "$output_file"
+            fi
+          done < deleted_files.txt
+
+      - name: Commit obfuscated files
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-          git add "$OUTPUT_FILE"
+          git add -A obfuscated
           if git diff --cached --quiet; then
-            echo "没有新的混淆文件变更，跳过提交"
+            echo "没有新的混淆产物变更，跳过提交"
             exit 0
           fi
-          git commit -m "build: update obfuscated index.js"
+          git commit -m "build: update obfuscated worker files"
 
       - name: Push changes
-        uses: ad-m/github-push-action@master
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          branch: ${{ github.ref_name }}
+        run: git push origin "${{ github.ref_name }}"
