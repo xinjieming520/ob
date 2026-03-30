@@ -1,5 +1,5 @@
-    // CFnew - 终端 v2.9.4
-    // 版本: v2.9.4
+    // CFnew - 终端 v2.9.6
+    // 版本: v2.9.6 
     import { connect } from 'cloudflare:sockets';
     let at = '351c9981-04b6-4103-aa4b-864aa9c91469';
     let fallbackAddress = '';
@@ -9,7 +9,6 @@
     let enableSocksDowngrade = false;
     let disableNonTLS = false;
     let disablePreferred = false;
-
     let enableRegionMatching = true;
     let currentWorkerRegion = '';
     let manualWorkerRegion = '';
@@ -22,8 +21,8 @@
     let tp = '';
     // 启用ECH功能（true启用，false禁用）
     let enableECH = false;  
-    // 自定义DNS服务器（默认：https://dns.joeyblog.eu.org/joeyblog）
-    let customDNS = 'https://dns.joeyblog.eu.org/joeyblog';
+    // 自定义DNS服务器（默认：https://223.5.5.5/dns-query）
+    let customDNS = 'https://223.5.5.5/dns-query';
     // 自定义ECH域名（默认：cloudflare-ech.com）
     let customECHDomain = 'cloudflare-ech.com';
 
@@ -33,12 +32,16 @@
 
     let epd = false;   // 优选域名默认关闭
     let epi = true;       
-    let egi = true;          
+    let egi = false;
+    let ena = false;   // 原生地址默认关闭          
 
     let kvStore = null;
     let kvConfig = {};
+    let kvConfigLastLoad = 0;
+    const KV_CACHE_TTL = 5 * 60 * 60 * 1000; // 5小时缓存
 
     const regionMapping = {
+        'HK': ['🇭🇰 香港', 'HK', 'Hong Kong'],
         'US': ['🇺🇸 美国', 'US', 'United States'],
         'SG': ['🇸🇬 新加坡', 'SG', 'Singapore'],
         'JP': ['🇯🇵 日本', 'JP', 'Japan'],
@@ -55,6 +58,7 @@
     };
 
     let backupIPs = [
+        { domain: 'ProxyIP.HK.CMLiussss.net', region: 'HK', regionCode: 'HK', port: 443 },
         { domain: 'ProxyIP.US.CMLiussss.net', region: 'US', regionCode: 'US', port: 443 },
         { domain: 'ProxyIP.SG.CMLiussss.net', region: 'SG', regionCode: 'SG', port: 443 },
         { domain: 'ProxyIP.JP.CMLiussss.net', region: 'JP', regionCode: 'JP', port: 443 },
@@ -131,9 +135,13 @@
         }
     }
 
-    async function loadKVConfig() {
+    async function loadKVConfig(force = false) {
         
         if (!kvStore) {
+            return;
+        }
+
+        if (!force && kvConfigLastLoad > 0 && (Date.now() - kvConfigLastLoad) < KV_CACHE_TTL) {
             return;
         }
         
@@ -144,6 +152,7 @@
                 kvConfig = JSON.parse(configData);
             } else {
             }
+            kvConfigLastLoad = Date.now();
         } catch (error) {
             kvConfig = {};
         }
@@ -157,6 +166,7 @@
         try {
             const configString = JSON.stringify(kvConfig);
             await kvStore.put('c', configString);
+            kvConfigLastLoad = Date.now();
         } catch (error) {
             throw error; 
         }
@@ -311,6 +321,21 @@
         async fetch(request, env, ctx) {
             try {
                 
+                const isWebSocket = request.headers.get('Upgrade') === atob('d2Vic29ja2V0');
+                const isPost = request.method === 'POST';
+                const reqUrl = new URL(request.url);
+                const pathSegments = reqUrl.pathname.split('/').filter(p => p);
+
+                if (!isWebSocket && !isPost && reqUrl.pathname !== '/') {
+                    const tmpAt = (env.u || env.U || '').toLowerCase();
+                    const tmpCp = (env.d || env.D || '').toLowerCase();
+                    const firstSeg = pathSegments[0] || '';
+                    const cleanCp = tmpCp.startsWith('/') ? tmpCp.substring(1) : tmpCp;
+                    if (firstSeg !== tmpAt && (cleanCp ? firstSeg !== cleanCp : false)) {
+                        return new Response('Not Found', { status: 404 });
+                    }
+                }
+
                 await initKVStore(env);
                 
                 at = (env.u || env.U || at).toLowerCase();
@@ -442,7 +467,12 @@
                 if (githubIPsControl !== undefined && githubIPsControl !== '') {
                     egi = githubIPsControl !== 'no' && githubIPsControl !== false && githubIPsControl !== 'false';
                 }
-                
+
+                const nativeAddressControl = getConfigValue('ena', env.ena);
+                if (nativeAddressControl !== undefined && nativeAddressControl !== '') {
+                    ena = nativeAddressControl !== 'no' && nativeAddressControl !== false && nativeAddressControl !== 'false';
+                }
+
                 const echControl = getConfigValue('ech', env.ech);
                 if (echControl !== undefined && echControl !== '') {
                     enableECH = echControl === 'yes' || echControl === true || echControl === 'true';
@@ -474,16 +504,9 @@
                     ev = true;
                 }
 
-            piu = getConfigValue('yxURL', env.yxURL || env.YXURL) || 'https://raw.githubusercontent.com/qwer-search/bestip/refs/heads/main/kejilandbestip.txt';
+            piu = getConfigValue('yxURL', env.yxURL || env.YXURL) || '';
             
             cp = getConfigValue('d', env.d || env.D) || '';
-            
-                const defaultURL = 'https://raw.githubusercontent.com/qwer-search/bestip/refs/heads/main/kejilandbestip.txt';
-            if (piu !== defaultURL) {
-                    directDomains.length = 0;
-                    customPreferredIPs = [];
-                    customPreferredDomains = [];
-                }
 
                 const url = new URL(request.url);
 
@@ -1246,7 +1269,7 @@
                 const path = params.get('path') || '/?ed=2048';
                 const host = params.get('host') || server;
                 const servername = params.get('sni') || host;
-                const alpn = params.get('alpn') || 'h3,h2,http/1.1';
+                const alpn = params.get('alpn') || 'h3';
                 const fingerprint = params.get('fp') || params.get('client-fingerprint') || 'chrome';
                 const ech = params.get('ech');
                 
@@ -1300,7 +1323,7 @@
                 const path = params.get('path') || '/?ed=2048';
                 const host = params.get('host') || server;
                 const sni = params.get('sni') || host;
-                const alpn = params.get('alpn') || 'h3,h2,http/1.1';
+                const alpn = params.get('alpn') || 'h3';
                 const ech = params.get('ech');
                 
                 const node = {
@@ -1393,7 +1416,7 @@
             // 替换 DNS nameserver 为阿里的加密 DNS
             clashConfig = clashConfig.replace(/^(\s*nameserver:\s*\n)((?:\s*-\s*[^\n]+\n)*)/m, (match, header, items) => {
                 // 替换所有 nameserver 项为阿里的加密 DNS
-                const dnsServer = customDNS || 'https://dns.joeyblog.eu.org/joeyblog';
+                const dnsServer = customDNS || 'https://223.5.5.5/dns-query';
                 return header + `    - ${dnsServer}\n`;
             });
             
@@ -1563,7 +1586,7 @@
         // 如果启用了ECH，使用自定义值
         let echConfig = null;
         if (enableECH) {
-            const dnsServer = customDNS || 'https://dns.joeyblog.eu.org/joeyblog';
+            const dnsServer = customDNS || 'https://223.5.5.5/dns-query';
             const echDomain = customECHDomain || 'cloudflare-ech.com';
             echConfig = `${echDomain}+${dnsServer}`;
         }
@@ -1580,26 +1603,28 @@
             }
         }
 
-        if (currentWorkerRegion === 'CUSTOM') {
-            const nativeList = [{ ip: workerDomain, isp: '原生地址' }];
-            await addNodesFromList(nativeList);
-        } else {
-            try {
+        if (ena) {
+            if (currentWorkerRegion === 'CUSTOM') {
                 const nativeList = [{ ip: workerDomain, isp: '原生地址' }];
                 await addNodesFromList(nativeList);
-            } catch (error) {
-                if (!currentWorkerRegion) {
-                    currentWorkerRegion = await detectWorkerRegion(request);
-                }
-                
-                const bestBackupIP = await getBestBackupIP(currentWorkerRegion);
-                if (bestBackupIP) {
-                    fallbackAddress = bestBackupIP.domain + ':' + bestBackupIP.port;
-                    const backupList = [{ ip: bestBackupIP.domain, isp: 'ProxyIP-' + currentWorkerRegion }];
-                    await addNodesFromList(backupList);
-                } else {
+            } else {
+                try {
                     const nativeList = [{ ip: workerDomain, isp: '原生地址' }];
                     await addNodesFromList(nativeList);
+                } catch (error) {
+                    if (!currentWorkerRegion) {
+                        currentWorkerRegion = await detectWorkerRegion(request);
+                    }
+                    
+                    const bestBackupIP = await getBestBackupIP(currentWorkerRegion);
+                    if (bestBackupIP) {
+                        fallbackAddress = bestBackupIP.domain + ':' + bestBackupIP.port;
+                        const backupList = [{ ip: bestBackupIP.domain, isp: 'ProxyIP-' + currentWorkerRegion }];
+                        await addNodesFromList(backupList);
+                    } else {
+                        const nativeList = [{ ip: workerDomain, isp: '原生地址' }];
+                        await addNodesFromList(nativeList);
+                    }
                 }
             }
         }
@@ -1625,8 +1650,7 @@
             }
 
             if (epi) {
-            const defaultURL = 'https://raw.githubusercontent.com/qwer-search/bestip/refs/heads/main/kejilandbestip.txt';
-                if (piu === defaultURL) {
+                if (!piu) {
                 try {
                     const dynamicIPList = await fetchDynamicIPs();
                     if (dynamicIPList.length > 0) {
@@ -1796,9 +1820,9 @@
                     
                     // 如果启用了ECH，添加ech参数（ECH需要伪装成Chrome浏览器）
                     if (enableECH) {
-                        const dnsServer = customDNS || 'https://dns.joeyblog.eu.org/joeyblog';
+                        const dnsServer = customDNS || 'https://223.5.5.5/dns-query';
                         const echDomain = customECHDomain || 'cloudflare-ech.com';
-                        wsParams.set('alpn', 'h3,h2,http/1.1');
+                        wsParams.set('alpn', 'h3');
                         wsParams.set('ech', `${echDomain}+${dnsServer}`);
                     }
                     
@@ -1877,9 +1901,9 @@
                     
                     // 如果启用了ECH，添加ech参数（ECH需要伪装成Chrome浏览器）
                     if (enableECH) {
-                        const dnsServer = customDNS || 'https://dns.joeyblog.eu.org/joeyblog';
+                        const dnsServer = customDNS || 'https://223.5.5.5/dns-query';
                         const echDomain = customECHDomain || 'cloudflare-ech.com';
-                        wsParams.set('alpn', 'h3,h2,http/1.1');
+                        wsParams.set('alpn', 'h3');
                         wsParams.set('ech', `${echDomain}+${dnsServer}`);
                     }
                     
@@ -2364,6 +2388,7 @@
                     builtinPreferred: '内置优选类型:',
                     enablePreferredDomain: '启用优选域名',
                     enablePreferredIP: '启用优选 IP',
+                    enableNativeAddress: '启用原生地址',
                     enableGitHubPreferred: '启用 GitHub 默认优选',
                     allowAPIManagement: '允许API管理 (ae):',
                     regionMatching: '地区匹配 (rm):',
@@ -2383,7 +2408,7 @@
                     enableECH: '启用 ECH (Encrypted Client Hello)',
                     enableECHHint: '启用后，每次刷新订阅时会自动从 DoH 获取最新的 ECH 配置并添加到链接中',
                     customDNS: '自定义 DNS 服务器',
-                    customDNSPlaceholder: '例如: https://dns.joeyblog.eu.org/joeyblog',
+                    customDNSPlaceholder: '例如: https://223.5.5.5/dns-query',
                     customDNSHint: '用于ECH配置查询的DNS服务器地址（DoH格式）',
                     customECHDomain: '自定义 ECH 域名',
                     customECHDomainPlaceholder: '例如: cloudflare-ech.com',
@@ -2408,11 +2433,11 @@
                     preferredControlYes: '关闭优选',
                     preferredControlHint: '设置为"关闭优选"时只使用原生地址，不生成优选IP和域名节点',
                     regionNames: {
-                        US: '🇺🇸 美国', SG: '🇸🇬 新加坡', JP: '🇯🇵 日本',
+                        HK: '🇭🇰 香港', US: '🇺🇸 美国', SG: '🇸🇬 新加坡', JP: '🇯🇵 日本',
                         KR: '🇰🇷 韩国', DE: '🇩🇪 德国', SE: '🇸🇪 瑞典', NL: '🇳🇱 荷兰',
                         FI: '🇫🇮 芬兰', GB: '🇬🇧 英国'
                     },
-                    terminal: '终端 v2.9.4',
+                    terminal: '终端 v2.9.6',
                     githubProject: 'GitHub 项目',
                     autoDetectClient: '自动识别',
                 selectionLogicText: '同地区 → 邻近地区 → 其他地区',
@@ -2467,7 +2492,7 @@
                     enableECH: 'فعال‌سازی ECH (Encrypted Client Hello)',
                     enableECHHint: 'پس از فعال‌سازی، در هر بار تازه‌سازی اشتراک، پیکربندی ECH به‌روز به‌طور خودکار از DoH دریافت شده و به لینک‌ها اضافه می‌شود',
                     customDNS: 'سرور DNS سفارشی',
-                    customDNSPlaceholder: 'مثال: https://dns.joeyblog.eu.org/joeyblog',
+                    customDNSPlaceholder: 'مثال: https://223.5.5.5/dns-query',
                     customDNSHint: 'آدرس سرور DNS برای جستجوی پیکربندی ECH (فرمت DoH)',
                     customECHDomain: 'دامنه ECH سفارشی',
                     customECHDomainPlaceholder: 'مثال: cloudflare-ech.com',
@@ -2511,6 +2536,7 @@
                     builtinPreferred: 'نوع ترجیحی داخلی:',
                     enablePreferredDomain: 'فعال‌سازی دامنه ترجیحی',
                     enablePreferredIP: 'فعال‌سازی IP ترجیحی',
+                    enableNativeAddress: 'فعال‌سازی آدرس اصلی',
                     enableGitHubPreferred: 'فعال‌سازی ترجیح پیش‌فرض GitHub',
                     allowAPIManagement: 'اجازه مدیریت API (ae):',
                     regionMatching: 'تطبیق منطقه (rm):',
@@ -2547,11 +2573,11 @@
                     preferredControlYes: 'بستن ترجیح',
                     preferredControlHint: 'وقتی "بستن ترجیح" تنظیم شود، فقط از آدرس اصلی استفاده می‌شود، گره‌های IP و دامنه ترجیحی تولید نمی‌شوند',
                     regionNames: {
-                        US: '🇺🇸 آمریکا', SG: '🇸🇬 سنگاپور', JP: '🇯🇵 ژاپن',
+                        HK: '🇭🇰 هنگ کنگ', US: '🇺🇸 آمریکا', SG: '🇸🇬 سنگاپور', JP: '🇯🇵 ژاپن',
                         KR: '🇰🇷 کره جنوبی', DE: '🇩🇪 آلمان', SE: '🇸🇪 سوئد', NL: '🇳🇱 هلند',
                         FI: '🇫🇮 فنلاند', GB: '🇬🇧 بریتانیا'
                     },
-                    terminal: 'ترمینال v2.9.4',
+                    terminal: 'ترمینال v2.9.6',
                     githubProject: 'پروژه GitHub',
                     autoDetectClient: 'تشخیص خودکار',
                 selectionLogicText: 'هم‌منطقه → منطقه مجاور → سایر مناطق',
@@ -2845,6 +2871,7 @@
                                 <label style="display: block; margin-bottom: 8px; color: #00ff00; font-weight: bold; text-shadow: 0 0 3px #00ff00;">${t.specifyRegion}</label>
                             <select id="wkRegion" style="width: 100%; padding: 12px; background: rgba(0, 0, 0, 0.8); border: 2px solid #00ff00; color: #00ff00; font-family: 'Courier New', monospace; font-size: 14px;">
                                     <option value="">${t.autoDetect}</option>
+                                    <option value="HK">${t.regionNames.HK}</option>
                                     <option value="US">${t.regionNames.US}</option>
                                     <option value="SG">${t.regionNames.SG}</option>
                                     <option value="JP">${t.regionNames.JP}</option>
@@ -2931,7 +2958,7 @@
                         </div>
                         <div style="margin-bottom: 15px;">
                                 <label style="display: block; margin-bottom: 8px; color: #00ff00; font-weight: bold; text-shadow: 0 0 3px #00ff00;">${t.preferredIPsURL}</label>
-                                <input type="text" id="yxURL" placeholder="${isFarsi ? 'پیش‌فرض: https://raw.githubusercontent.com/qwer-search/bestip/refs/heads/main/kejilandbestip.txt' : '默认: https://raw.githubusercontent.com/qwer-search/bestip/refs/heads/main/kejilandbestip.txt'}" style="width: 100%; padding: 12px; background: rgba(0, 0, 0, 0.8); border: 2px solid #00ff00; color: #00ff00; font-family: 'Courier New', monospace; font-size: 14px;">
+                                <input type="text" id="yxURL" placeholder="${isFarsi ? 'URL منبع لیست IP ترجیحی را وارد کنید' : '输入优选IP列表来源URL'}" style="width: 100%; padding: 12px; background: rgba(0, 0, 0, 0.8); border: 2px solid #00ff00; color: #00ff00; font-family: 'Courier New', monospace; font-size: 14px;">
                                 <small style="color: #00aa00; font-size: 0.85rem;">${isFarsi ? 'URL منبع لیست IP ترجیحی سفارشی، اگر خالی بگذارید از آدرس پیش‌فرض استفاده می‌شود' : '自定义优选IP列表来源URL，留空则使用默认地址'}</small>
                         </div>
                         
@@ -3025,6 +3052,12 @@
                         <div style="margin-bottom: 15px;">
                                 <label style="display: block; margin-bottom: 8px; color: #00ff00; font-weight: bold; text-shadow: 0 0 3px #00ff00;">${t.builtinPreferred}</label>
                             <div style="padding: 15px; background: rgba(0, 20, 0, 0.6); border: 1px solid #00ff00; border-radius: 5px;">
+                                <div style="margin-bottom: 10px;">
+                                    <label style="display: inline-flex; align-items: center; cursor: pointer; color: #00ff00;">
+                                        <input type="checkbox" id="ena" style="margin-right: 8px; width: 18px; height: 18px; cursor: pointer;">
+                                            <span style="font-size: 1.1rem;">${t.enableNativeAddress}</span>
+                                    </label>
+                                </div>
                                 <div style="margin-bottom: 10px;">
                                     <label style="display: inline-flex; align-items: center; cursor: pointer; color: #00ff00;">
                                         <input type="checkbox" id="epd" style="margin-right: 8px; width: 18px; height: 18px; cursor: pointer;">
@@ -3475,7 +3508,7 @@
                                 currentIP: '当前使用IP: ',
                                 regionMatch: '地区匹配: ',
                                 regionNames: {
-                        'US': '🇺🇸 美国', 'SG': '🇸🇬 新加坡', 'JP': '🇯🇵 日本',
+                        'HK': '🇭🇰 香港', 'US': '🇺🇸 美国', 'SG': '🇸🇬 新加坡', 'JP': '🇯🇵 日本',
                         'KR': '🇰🇷 韩国', 'DE': '🇩🇪 德国', 'SE': '🇸🇪 瑞典', 'NL': '🇳🇱 荷兰',
                         'FI': '🇫🇮 芬兰', 'GB': '🇬🇧 英国'
                                 },
@@ -3500,7 +3533,7 @@
                                 currentIP: 'IP فعلی: ',
                                 regionMatch: 'تطبیق منطقه: ',
                                 regionNames: {
-                                    'US': '🇺🇸 آمریکا', 'SG': '🇸🇬 سنگاپور', 'JP': '🇯🇵 ژاپن',
+                                    'HK': '🇭🇰 هنگ کنگ', 'US': '🇺🇸 آمریکا', 'SG': '🇸🇬 سنگاپور', 'JP': '🇯🇵 ژاپن',
                                     'KR': '🇰🇷 کره جنوبی', 'DE': '🇩🇪 آلمان', 'SE': '🇸🇪 سوئد', 'NL': '🇳🇱 هلند',
                                     'FI': '🇫🇮 فنلاند', 'GB': '🇬🇧 بریتانیا'
                                 },
@@ -3870,6 +3903,7 @@
                         document.getElementById('customECHDomain').value = config.customECHDomain || '';
                     }
                     document.getElementById('scu').value = config.scu || '';
+                    document.getElementById('ena').checked = config.ena === 'yes';
                     document.getElementById('epd').checked = config.epd !== 'no';
                     document.getElementById('epi').checked = config.epi !== 'no';
                     document.getElementById('egi').checked = config.egi !== 'no';
@@ -4202,7 +4236,7 @@
                 if (advancedConfigForm) {
                     advancedConfigForm.addEventListener('submit', async function(e) {
                         e.preventDefault();
-                        const configData = { scu: document.getElementById('scu').value, epd: document.getElementById('epd').checked ? 'yes' : 'no', epi: document.getElementById('epi').checked ? 'yes' : 'no', egi: document.getElementById('egi').checked ? 'yes' : 'no', ae: document.getElementById('apiEnabled').value,
+                        const configData = { scu: document.getElementById('scu').value, ena: document.getElementById('ena').checked ? 'yes' : 'no', epd: document.getElementById('epd').checked ? 'yes' : 'no', epi: document.getElementById('epi').checked ? 'yes' : 'no', egi: document.getElementById('egi').checked ? 'yes' : 'no', ae: document.getElementById('apiEnabled').value,
                             rm: document.getElementById('regionMatching').value,
                             qj: document.getElementById('downgradeControl').value,
                             dkby: document.getElementById('portControl').value,
@@ -4600,7 +4634,7 @@
                                 customIP: document.getElementById('customIP').value,
                                 yx: newValue,
                                 yxURL: document.getElementById('yxURL').value,
-                                socksConfig: document.getElementById('socksConfig').value
+                                s: document.getElementById('socksConfig').value
                             };
                             await saveConfig(configData);
                             showStatus('${isFarsi ? 'موفقیت‌آمیز بود' : '已覆盖'} ' + selectedItems.length + ' ${isFarsi ? 'مورد و ذخیره شد' : '项并已保存'}', 'success');
@@ -4635,7 +4669,7 @@
                                 customIP: document.getElementById('customIP').value,
                                 yx: newValue,
                                 yxURL: document.getElementById('yxURL').value,
-                                socksConfig: document.getElementById('socksConfig').value
+                                s: document.getElementById('socksConfig').value
                             };
                             await saveConfig(configData);
                             showStatus('${isFarsi ? 'موفقیت‌آمیز بود' : '已追加'} ' + selectedItems.length + ' ${isFarsi ? 'مورد و ذخیره شد' : '项并已保存'}', 'success');
@@ -5566,7 +5600,7 @@
     }
 
     async function fetchAndParseNewIPs() {
-        const url = piu || "https://raw.githubusercontent.com/qwer-search/bestip/refs/heads/main/kejilandbestip.txt";
+        const url = piu;
         try {
             const urls = url.includes(',') ? url.split(',').map(u => u.trim()).filter(u => u) : [url];
             const apiResults = await fetchPreferredAPI(urls, '443', 5000);
@@ -5633,9 +5667,9 @@
                 
                 // 如果启用了ECH，添加ech参数（ECH需要伪装成Chrome浏览器）
                 if (enableECH) {
-                    const dnsServer = customDNS || 'https://dns.joeyblog.eu.org/joeyblog';
+                    const dnsServer = customDNS || 'https://223.5.5.5/dns-query';
                     const echDomain = customECHDomain || 'cloudflare-ech.com';
-                    link += `&alpn=h3%2Ch2%2Chttp%2F1.1&ech=${encodeURIComponent(`${echDomain}+${dnsServer}`)}`;
+                    link += `&alpn=h3&ech=${encodeURIComponent(`${echDomain}+${dnsServer}`)}`;
                 }
                 
                 link += `#${encodeURIComponent(wsNodeName)}`;
@@ -5654,9 +5688,9 @@
                 
                 // 如果启用了ECH，添加ech参数（ECH需要伪装成Chrome浏览器）
                 if (enableECH) {
-                    const dnsServer = customDNS || 'https://dns.joeyblog.eu.org/joeyblog';
+                    const dnsServer = customDNS || 'https://223.5.5.5/dns-query';
                     const echDomain = customECHDomain || 'cloudflare-ech.com';
-                    link += `&alpn=h3%2Ch2%2Chttp%2F1.1&ech=${encodeURIComponent(`${echDomain}+${dnsServer}`)}`;
+                    link += `&alpn=h3&ech=${encodeURIComponent(`${echDomain}+${dnsServer}`)}`;
                 }
                 
                 link += `#${encodeURIComponent(wsNodeName)}`;
@@ -5690,11 +5724,10 @@
                 mode: 'stream-one'
             });
             
-            // 如果启用了ECH，添加ech参数（ECH需要伪装成Chrome浏览器）
             if (enableECH) {
-                const dnsServer = customDNS || 'https://dns.joeyblog.eu.org/joeyblog';
+                const dnsServer = customDNS || 'https://223.5.5.5/dns-query';
                 const echDomain = customECHDomain || 'cloudflare-ech.com';
-                params.set('alpn', 'h3,h2,http/1.1');
+                params.set('alpn', 'h2');
                 params.set('ech', `${echDomain}+${dnsServer}`);
             }
             
@@ -5725,9 +5758,9 @@
                 
                 // 如果启用了ECH，添加ech参数（ECH需要伪装成Chrome浏览器）
                 if (enableECH) {
-                    const dnsServer = customDNS || 'https://dns.joeyblog.eu.org/joeyblog';
+                    const dnsServer = customDNS || 'https://223.5.5.5/dns-query';
                     const echDomain = customECHDomain || 'cloudflare-ech.com';
-                    link += `&alpn=h3%2Ch2%2Chttp%2F1.1&ech=${encodeURIComponent(`${echDomain}+${dnsServer}`)}`;
+                    link += `&alpn=h3&ech=${encodeURIComponent(`${echDomain}+${dnsServer}`)}`;
                 }
                 
                 link += `#${encodeURIComponent(wsNodeName)}`;
@@ -5746,9 +5779,9 @@
                 
                 // 如果启用了ECH，添加ech参数（ECH需要伪装成Chrome浏览器）
                 if (enableECH) {
-                    const dnsServer = customDNS || 'https://dns.joeyblog.eu.org/joeyblog';
+                    const dnsServer = customDNS || 'https://223.5.5.5/dns-query';
                     const echDomain = customECHDomain || 'cloudflare-ech.com';
-                    link += `&alpn=h3%2Ch2%2Chttp%2F1.1&ech=${encodeURIComponent(`${echDomain}+${dnsServer}`)}`;
+                    link += `&alpn=h3&ech=${encodeURIComponent(`${echDomain}+${dnsServer}`)}`;
                 }
                 
                 link += `#${encodeURIComponent(wsNodeName)}`;
@@ -5808,53 +5841,6 @@
                     updateCustomPreferredFromYx();
                 }
                 
-                const newPreferredIPsURL = getConfigValue('yxURL', '') || 'https://raw.githubusercontent.com/qwer-search/bestip/refs/heads/main/kejilandbestip.txt';
-                const defaultURL = 'https://raw.githubusercontent.com/qwer-search/bestip/refs/heads/main/kejilandbestip.txt';
-                if (newPreferredIPsURL !== defaultURL) {
-                    directDomains.length = 0;
-                    customPreferredIPs = [];
-                    customPreferredDomains = [];
-                } else {
-                    backupIPs = [
-                        { domain: 'ProxyIP.US.CMLiussss.net', region: 'US', regionCode: 'US', port: 443 },
-                        { domain: 'ProxyIP.SG.CMLiussss.net', region: 'SG', regionCode: 'SG', port: 443 },
-                        { domain: 'ProxyIP.JP.CMLiussss.net', region: 'JP', regionCode: 'JP', port: 443 },
-                        { domain: 'ProxyIP.KR.CMLiussss.net', region: 'KR', regionCode: 'KR', port: 443 },
-                        { domain: 'ProxyIP.DE.CMLiussss.net', region: 'DE', regionCode: 'DE', port: 443 },
-                        { domain: 'ProxyIP.SE.CMLiussss.net', region: 'SE', regionCode: 'SE', port: 443 },
-                        { domain: 'ProxyIP.NL.CMLiussss.net', region: 'NL', regionCode: 'NL', port: 443 },
-                        { domain: 'ProxyIP.FI.CMLiussss.net', region: 'FI', regionCode: 'FI', port: 443 },
-                        { domain: 'ProxyIP.GB.CMLiussss.net', region: 'GB', regionCode: 'GB', port: 443 },
-                        { domain: 'ProxyIP.Oracle.cmliussss.net', region: 'Oracle', regionCode: 'Oracle', port: 443 },
-                        { domain: 'ProxyIP.DigitalOcean.CMLiussss.net', region: 'DigitalOcean', regionCode: 'DigitalOcean', port: 443 },
-                        { domain: 'ProxyIP.Vultr.CMLiussss.net', region: 'Vultr', regionCode: 'Vultr', port: 443 },
-                        { domain: 'ProxyIP.Multacom.CMLiussss.net', region: 'Multacom', regionCode: 'Multacom', port: 443 }
-                    ];
-                    directDomains.length = 0;
-                    directDomains.push(
-                        { name: "cloudflare.182682.xyz", domain: "cloudflare.182682.xyz" }, 
-                        { name: "speed.marisalnc.com", domain: "speed.marisalnc.com" },
-                        { domain: "freeyx.cloudflare88.eu.org" }, 
-                        { domain: "bestcf.top" }, 
-                        { domain: "cdn.2020111.xyz" }, 
-                        { domain: "cfip.cfcdn.vip" },
-                        { domain: "cf.0sm.com" }, 
-                        { domain: "cf.090227.xyz" }, 
-                        { domain: "cf.zhetengsha.eu.org" }, 
-                        { domain: "cloudflare.9jy.cc" },
-                        { domain: "cf.zerone-cdn.pp.ua" }, 
-                        { domain: "cfip.1323123.xyz" }, 
-                        { domain: "cnamefuckxxs.yuchen.icu" }, 
-                        { domain: "cloudflare-ip.mofashi.ltd" },
-                        { domain: "115155.xyz" }, 
-                        { domain: "cname.xirancdn.us" }, 
-                        { domain: "f3058171cad.002404.xyz" }, 
-                        { domain: "8.889288.xyz" },
-                        { domain: "cdn.tzpro.xyz" }, 
-                        { domain: "cf.877771.xyz" }, 
-                        { domain: "xn--b6gac.eu.org" }
-                    );
-                }
                 
                 return new Response(JSON.stringify({
                     success: true,
@@ -6146,7 +6132,12 @@
         if (githubIPsControl !== undefined && githubIPsControl !== '') {
             egi = githubIPsControl !== 'no' && githubIPsControl !== false && githubIPsControl !== 'false';
         }
-        
+
+        const nativeAddressControl = getConfigValue('ena', '');
+        if (nativeAddressControl !== undefined && nativeAddressControl !== '') {
+            ena = nativeAddressControl !== 'no' && nativeAddressControl !== false && nativeAddressControl !== 'false';
+        }
+
         const echControl = getConfigValue('ech', '');
         if (echControl !== undefined && echControl !== '') {
             enableECH = echControl === 'yes' || echControl === true || echControl === 'true';
@@ -6157,7 +6148,7 @@
         if (customDNSValue && customDNSValue.trim()) {
             customDNS = customDNSValue.trim();
         } else {
-            customDNS = 'https://dns.joeyblog.eu.org/joeyblog';
+            customDNS = 'https://223.5.5.5/dns-query';
         }
         
         const customECHDomainValue = getConfigValue('customECHDomain', '');
@@ -6181,7 +6172,7 @@
         
         cp = getConfigValue('d', '') || '';
         
-        piu = getConfigValue('yxURL', '') || 'https://raw.githubusercontent.com/qwer-search/bestip/refs/heads/main/kejilandbestip.txt';
+        piu = getConfigValue('yxURL', '') || '';
         
         const envFallback = getConfigValue('p', '');
         if (envFallback) {
@@ -6209,12 +6200,6 @@
             disablePreferred = false;
         }
         
-        const defaultURL = 'https://raw.githubusercontent.com/qwer-search/bestip/refs/heads/main/kejilandbestip.txt';
-        if (piu !== defaultURL) {
-            directDomains.length = 0;
-            customPreferredIPs = [];
-            customPreferredDomains = [];
-        }
     }
 
     function updateCustomPreferredFromYx() {
