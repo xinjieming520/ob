@@ -1,8 +1,20 @@
 {
   "inputDir": "_worker",
   "outputDir": "obfuscated",
-  "preset": "balanced",
+  "preset": "hybrid-protection",
   "presets": {
+    "hybrid-protection": {
+      "compact": true,
+      "controlFlowFlattening": false,
+      "deadCodeInjection": false,
+      "identifierNamesGenerator": "hexadecimal",
+      "renameGlobals": false,
+      "stringArray": true,
+      "stringArrayEncoding": ["base64"],
+      "stringArrayThreshold": 0.80,
+      "transformObjectKeys": false,
+      "unicodeEscapeSequence": false
+    },
     "balanced": {
       "compact": true,
       "controlFlowFlattening": true,
@@ -30,18 +42,6 @@
       "stringArrayThreshold": 0.80,
       "transformObjectKeys": true,
       "unicodeEscapeSequence": true
-    },
-    "low-impact": {
-      "compact": true,
-      "controlFlowFlattening": false,
-      "deadCodeInjection": false,
-      "identifierNamesGenerator": "hexadecimal",
-      "renameGlobals": false,
-      "stringArray": true,
-      "stringArrayEncoding": ["base64"],
-      "stringArrayThreshold": 0.50,
-      "transformObjectKeys": false,
-      "unicodeEscapeSequence": false
     }
   }
 }
