@@ -30,12 +30,19 @@ jobs:
         with:
           node-version: "20"
 
+      - name: Cache npm global directory
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-npm-obfuscator-${{ hashFiles('.github/workflows/obfuscator.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-npm-obfuscator-
+
       - name: Install javascript-obfuscator
-        run: npm install -g javascript-obfuscator
+        run: npm install -g javascript-obfuscator --prefer-offline --no-audit
 
       - name: Prepare output directory
-        run: |
-          mkdir -p obfuscated
+        run: mkdir -p obfuscated
 
       - name: Collect changed worker files
         id: changed_files
@@ -47,18 +54,19 @@ jobs:
             BEFORE_SHA="${{ github.event.before }}"
             AFTER_SHA="${{ github.sha }}"
 
-            if [ "$BEFORE_SHA" = "0000000000000000000000000000000000000000" ]; then
+            if [ "$BEFORE_SHA" = "0000000000000000000000000000000000000000" ] || [ -z "$BEFORE_SHA" ]; then
               git ls-tree -r --name-only "$AFTER_SHA" -- _worker > changed_files.txt
               : > deleted_files.txt
             else
-              git diff --diff-filter=AMR --name-only "$BEFORE_SHA" "$AFTER_SHA" -- _worker | sort -u > changed_files.txt
-              git diff --diff-filter=D --name-only "$BEFORE_SHA" "$AFTER_SHA" -- _worker | sort -u > deleted_files.txt
+              # 使用 --no-renames 确保重命名的文件被正确识别为 "删除旧文件" + "创建新文件"
+              git diff --no-renames --diff-filter=AMR --name-only "$BEFORE_SHA" "$AFTER_SHA" -- _worker | sort -u > changed_files.txt
+              git diff --no-renames --diff-filter=D --name-only "$BEFORE_SHA" "$AFTER_SHA" -- _worker | sort -u > deleted_files.txt
             fi
           fi
 
           if [ -s changed_files.txt ]; then
             echo "has_changes=true" >> "$GITHUB_OUTPUT"
-            echo "本次需要混淆的文件："
+            echo "=== 本次需要混淆的文件 ==="
             cat changed_files.txt
           else
             echo "has_changes=false" >> "$GITHUB_OUTPUT"
@@ -66,7 +74,7 @@ jobs:
           fi
 
           if [ -s deleted_files.txt ]; then
-            echo "本次需要删除的混淆文件："
+            echo "=== 本次需要清理的已删除文件 ==="
             cat deleted_files.txt
           fi
 
@@ -77,21 +85,21 @@ jobs:
             [ -n "$input_file" ] || continue
             output_file="obfuscated/${input_file#_worker/}"
             mkdir -p "$(dirname "$output_file")"
-            echo "Obfuscating $input_file -> $output_file"
+            echo "Obfuscating: $input_file -> $output_file"
 
             javascript-obfuscator "$input_file" --output "$output_file" \
-            --compact true \
-            --control-flow-flattening true \
-            --control-flow-flattening-threshold 1 \
-            --dead-code-injection true \
-            --dead-code-injection-threshold 1 \
-            --identifier-names-generator hexadecimal \
-            --rename-globals true \
-            --string-array true \
-            --string-array-encoding 'rc4' \
-            --string-array-threshold 1 \
-            --transform-object-keys true \
-            --unicode-escape-sequence true
+              --compact true \
+              --control-flow-flattening true \
+              --control-flow-flattening-threshold 0.25 \
+              --dead-code-injection true \
+              --dead-code-injection-threshold 0.20 \
+              --identifier-names-generator hexadecimal \
+              --rename-globals false \
+              --string-array true \
+              --string-array-encoding 'base64' \
+              --string-array-threshold 0.75 \
+              --transform-object-keys true \
+              --unicode-escape-sequence false
           done < changed_files.txt
 
       - name: Remove deleted worker outputs
@@ -104,7 +112,7 @@ jobs:
             [ -n "$deleted_file" ] || continue
             output_file="obfuscated/${deleted_file#_worker/}"
             if [ -f "$output_file" ]; then
-              echo "Removing $output_file"
+              echo "Cleaning up obfuscated output: $output_file"
               rm -f "$output_file"
             fi
           done < deleted_files.txt
@@ -118,7 +126,9 @@ jobs:
             echo "没有新的混淆产物变更，跳过提交"
             exit 0
           fi
-          git commit -m "build: update obfuscated worker files"
+          git commit -m "build: update obfuscated worker files [skip ci]"
 
       - name: Push changes
-        run: git push origin "${{ github.ref_name }}"
+        run: |
+          git pull --rebase origin "${{ github.ref_name }}"
+          git push origin "${{ github.ref_name }}"
