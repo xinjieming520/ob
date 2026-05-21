@@ -1,0 +1,47 @@
+{
+  "inputDir": "_worker",
+  "outputDir": "obfuscated",
+  "preset": "balanced",
+  "presets": {
+    "balanced": {
+      "compact": true,
+      "controlFlowFlattening": true,
+      "controlFlowFlatteningThreshold": 0.25,
+      "deadCodeInjection": true,
+      "deadCodeInjectionThreshold": 0.20,
+      "identifierNamesGenerator": "hexadecimal",
+      "renameGlobals": false,
+      "stringArray": true,
+      "stringArrayEncoding": ["base64"],
+      "stringArrayThreshold": 0.75,
+      "transformObjectKeys": true,
+      "unicodeEscapeSequence": false
+    },
+    "high-security": {
+      "compact": true,
+      "controlFlowFlattening": true,
+      "controlFlowFlatteningThreshold": 0.75,
+      "deadCodeInjection": true,
+      "deadCodeInjectionThreshold": 0.50,
+      "identifierNamesGenerator": "hexadecimal",
+      "renameGlobals": false,
+      "stringArray": true,
+      "stringArrayEncoding": ["rc4"],
+      "stringArrayThreshold": 0.80,
+      "transformObjectKeys": true,
+      "unicodeEscapeSequence": true
+    },
+    "low-impact": {
+      "compact": true,
+      "controlFlowFlattening": false,
+      "deadCodeInjection": false,
+      "identifierNamesGenerator": "hexadecimal",
+      "renameGlobals": false,
+      "stringArray": true,
+      "stringArrayEncoding": ["base64"],
+      "stringArrayThreshold": 0.50,
+      "transformObjectKeys": false,
+      "unicodeEscapeSequence": false
+    }
+  }
+}

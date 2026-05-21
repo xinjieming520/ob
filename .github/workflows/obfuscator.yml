@@ -34,12 +34,12 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.npm
-          key: ${{ runner.os }}-npm-obfuscator-${{ hashFiles('.github/workflows/obfuscator.yml') }}
+          key: ${{ runner.os }}-npm-obfuscator-${{ hashFiles('package.json') }}
           restore-keys: |
             ${{ runner.os }}-npm-obfuscator-
 
-      - name: Install javascript-obfuscator
-        run: npm install -g javascript-obfuscator --prefer-offline --no-audit
+      - name: Install dependencies
+        run: npm install --prefer-offline --no-audit
 
       - name: Prepare output directory
         run: mkdir -p obfuscated
@@ -78,44 +78,17 @@ jobs:
             cat deleted_files.txt
           fi
 
+      # 优化点：直接调用统一的 node obfuscate.js 增量参数，简化 Shell 代码
       - name: Obfuscate changed worker files
         if: steps.changed_files.outputs.has_changes == 'true'
-        run: |
-          while IFS= read -r input_file; do
-            [ -n "$input_file" ] || continue
-            output_file="obfuscated/${input_file#_worker/}"
-            mkdir -p "$(dirname "$output_file")"
-            echo "Obfuscating: $input_file -> $output_file"
+        run: xargs node obfuscate.js < changed_files.txt
 
-            javascript-obfuscator "$input_file" --output "$output_file" \
-              --compact true \
-              --control-flow-flattening true \
-              --control-flow-flattening-threshold 0.25 \
-              --dead-code-injection true \
-              --dead-code-injection-threshold 0.20 \
-              --identifier-names-generator hexadecimal \
-              --rename-globals false \
-              --string-array true \
-              --string-array-encoding 'base64' \
-              --string-array-threshold 0.75 \
-              --transform-object-keys true \
-              --unicode-escape-sequence false
-          done < changed_files.txt
-
+      # 优化点：直接调用统一的 node obfuscate.js --delete 清理参数，简化 Shell 代码
       - name: Remove deleted worker outputs
         run: |
-          if [ ! -s deleted_files.txt ]; then
-            exit 0
+          if [ -s deleted_files.txt ]; then
+            xargs node obfuscate.js --delete < deleted_files.txt
           fi
-
-          while IFS= read -r deleted_file; do
-            [ -n "$deleted_file" ] || continue
-            output_file="obfuscated/${deleted_file#_worker/}"
-            if [ -f "$output_file" ]; then
-              echo "Cleaning up obfuscated output: $output_file"
-              rm -f "$output_file"
-            fi
-          done < deleted_files.txt
 
       - name: Commit obfuscated files
         run: |

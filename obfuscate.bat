@@ -2,7 +2,7 @@
 :: 设置字符集为 UTF-8 防止中文乱码
 chcp 65001 >nul
 echo ==================================================
-echo         Cloudflare Worker 本地一键混淆脚本
+echo   Cloudflare Worker 本地一键混淆脚本 (配置驱动版)
 echo ==================================================
 echo.
 
@@ -21,14 +21,14 @@ if not exist node_modules (
     echo.
 )
 
-echo [执行] 正在启动本地代码混淆...
+echo [执行] 正在通过 obfuscator-config.json 启动混淆器...
 echo.
 call npm run obfuscate:all
 
 if %errorlevel% equ 0 (
     echo.
     echo ==================================================
-    echo [成功] 代码混淆成功！产物已输出到 obfuscated/ 目录。
+    echo [成功] 代码混淆成功！产物已输出到指定的输出目录。
     echo ==================================================
 ) else (
     echo.
