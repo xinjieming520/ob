@@ -1,0 +1,11 @@
+{
+  "name": "cf-worker-obfuscator",
+  "version": "1.0.0",
+  "description": "Cloudflare Worker 混淆与本地开发工具集",
+  "scripts": {
+    "obfuscate:all": "javascript-obfuscator _worker --output obfuscated --compact true --control-flow-flattening true --control-flow-flattening-threshold 0.25 --dead-code-injection true --dead-code-injection-threshold 0.20 --identifier-names-generator hexadecimal --rename-globals false --string-array true --string-array-encoding base64 --string-array-threshold 0.75 --transform-object-keys true --unicode-escape-sequence false"
+  },
+  "devDependencies": {
+    "javascript-obfuscator": "^4.1.0"
+  }
+}
