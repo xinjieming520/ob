@@ -1,7 +1,7 @@
 {
   "inputDir": "_worker",
   "outputDir": "obfuscated",
-  "preset": "high-security",
+  "preset": "hybrid-protection",
   "presets": {
     "hybrid-protection": {
       "compact": true,
